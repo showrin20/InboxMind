@@ -151,7 +151,7 @@ class Email(Base, UUIDMixin, TenantMixin, TimestampMixin):
     provider = Column(
         String(50),
         nullable=False,
-        comment="Email provider: 'google' or 'microsoft'"
+        comment="Email provider: 'google'"
     )
     
     provider_message_id = Column(

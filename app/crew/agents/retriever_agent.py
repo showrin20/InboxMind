@@ -4,7 +4,7 @@ First agent in the RAG pipeline
 """
 from typing import List, Dict, Any
 from crewai import Agent
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.core.config import get_settings
 
@@ -25,10 +25,10 @@ def create_retriever_agent() -> Agent:
         CrewAI Agent configured for retrieval
     """
     
-    llm = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
+    llm = ChatGoogleGenerativeAI(
+        model=settings.GEMINI_MODEL,
         temperature=0.0,  # Deterministic for retrieval
-        api_key=settings.OPENAI_API_KEY
+        google_api_key=settings.GEMINI_API_KEY
     )
     
     return Agent(

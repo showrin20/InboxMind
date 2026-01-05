@@ -65,7 +65,7 @@ class User(Base, UUIDMixin, TimestampMixin):
     oauth_provider = Column(
         String(50),
         nullable=True,
-        comment="OAuth provider: 'google' or 'microsoft'"
+        comment="OAuth provider: 'google'"
     )
     
     oauth_provider_id = Column(

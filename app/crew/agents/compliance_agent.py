@@ -3,7 +3,7 @@ ComplianceAgent - PII Redaction and Content Flagging
 Fourth agent in the RAG pipeline
 """
 from crewai import Agent
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.core.config import get_settings
 
@@ -26,10 +26,10 @@ def create_compliance_agent() -> Agent:
         CrewAI Agent configured for compliance
     """
     
-    llm = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
+    llm = ChatGoogleGenerativeAI(
+        model=settings.GEMINI_MODEL,
         temperature=0.0,  # Deterministic for compliance
-        api_key=settings.OPENAI_API_KEY
+        google_api_key=settings.GEMINI_API_KEY
     )
     
     return Agent(

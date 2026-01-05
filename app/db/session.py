@@ -19,14 +19,24 @@ logger = logging.getLogger(__name__)
 
 
 # Async engine configuration
-engine = create_async_engine(
-    settings.get_database_url(async_driver=True),
-    echo=settings.DB_ECHO,
-    pool_size=settings.DB_POOL_SIZE if not settings.DATABASE_URL.startswith("sqlite") else 0,
-    max_overflow=settings.DB_MAX_OVERFLOW if not settings.DATABASE_URL.startswith("sqlite") else 0,
-    poolclass=NullPool if settings.DATABASE_URL.startswith("sqlite") else QueuePool,
-    future=True,
-)
+_is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+
+if _is_sqlite:
+    engine = create_async_engine(
+        settings.get_database_url(async_driver=True),
+        echo=settings.DB_ECHO,
+        poolclass=NullPool,
+        future=True,
+    )
+else:
+    engine = create_async_engine(
+        settings.get_database_url(async_driver=True),
+        echo=settings.DB_ECHO,
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_MAX_OVERFLOW,
+        poolclass=QueuePool,
+        future=True,
+    )
 
 # Async session factory
 AsyncSessionLocal = async_sessionmaker(

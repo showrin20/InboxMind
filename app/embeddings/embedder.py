@@ -1,12 +1,12 @@
 """
 Embedding Generation Service
-OpenAI embeddings with chunking and batch processing
+Google Gemini embeddings with chunking and batch processing
 """
 from typing import List, Dict, Any, Tuple
 import logging
 from datetime import datetime
 import tiktoken
-from openai import AsyncOpenAI
+import google.generativeai as genai
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import get_settings
@@ -19,13 +19,13 @@ logger = logging.getLogger(__name__)
 
 class EmbeddingService:
     """
-    Service for generating embeddings using OpenAI.
+    Service for generating embeddings using Google Gemini.
     Handles text chunking, batch processing, and error recovery.
     """
     
     def __init__(self):
-        self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        self.model = settings.OPENAI_EMBEDDING_MODEL
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        self.model = settings.GEMINI_EMBEDDING_MODEL
         self.dimension = settings.PINECONE_DIMENSION
         self.tokenizer = tiktoken.encoding_for_model("gpt-4")
         
@@ -119,20 +119,20 @@ class EmbeddingService:
             text: Text to embed
             
         Returns:
-            Embedding vector (1536 dimensions)
+            Embedding vector (768 dimensions for Gemini)
         """
         if not text or not text.strip():
             logger.warning("Attempted to embed empty text")
             return [0.0] * self.dimension
         
         try:
-            response = await self.client.embeddings.create(
+            result = genai.embed_content(
                 model=self.model,
-                input=text,
-                encoding_format="float"
+                content=text,
+                task_type="retrieval_document"
             )
             
-            embedding = response.data[0].embedding
+            embedding = result['embedding']
             
             # Verify dimension
             if len(embedding) != self.dimension:
@@ -164,14 +164,14 @@ class EmbeddingService:
         start_time = datetime.now()
         
         try:
-            # OpenAI supports batch embeddings
-            response = await self.client.embeddings.create(
+            # Gemini supports batch embeddings
+            result = genai.embed_content(
                 model=self.model,
-                input=texts,
-                encoding_format="float"
+                content=texts,
+                task_type="retrieval_document"
             )
             
-            embeddings = [item.embedding for item in response.data]
+            embeddings = result['embedding'] if isinstance(result['embedding'][0], list) else [result['embedding']]
             
             duration_ms = (datetime.now() - start_time).total_seconds() * 1000
             

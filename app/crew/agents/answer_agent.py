@@ -3,7 +3,7 @@ AnswerAgent - Generates Final User Response with Citations
 Fifth and final agent in the RAG pipeline
 """
 from crewai import Agent
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.core.config import get_settings
 
@@ -26,10 +26,10 @@ def create_answer_agent() -> Agent:
         CrewAI Agent configured for answer generation
     """
     
-    llm = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
+    llm = ChatGoogleGenerativeAI(
+        model=settings.GEMINI_MODEL,
         temperature=0.3,  # Slight creativity for natural language
-        api_key=settings.OPENAI_API_KEY
+        google_api_key=settings.GEMINI_API_KEY
     )
     
     return Agent(

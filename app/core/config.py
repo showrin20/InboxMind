@@ -50,12 +50,12 @@ class Settings(BaseSettings):
     PINECONE_METRIC: str = Field(default="cosine", pattern="^(cosine|euclidean|dotproduct)$")
     PINECONE_NAMESPACE_PREFIX: str = "org"  # org_{org_id}_user_{user_id}
     
-    # OpenAI
-    OPENAI_API_KEY: str = Field(min_length=20)
-    OPENAI_MODEL: str = "gpt-4-turbo-preview"
-    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
-    OPENAI_MAX_TOKENS: int = 4096
-    OPENAI_TEMPERATURE: float = 0.2  # Lower for factual RAG responses
+    # Google Gemini
+    GEMINI_API_KEY: Optional[str] = Field(default=None, min_length=20)
+    GEMINI_MODEL: str = "gemini-2.0-flash-exp"
+    GEMINI_EMBEDDING_MODEL: str = "models/text-embedding-004"
+    GEMINI_MAX_TOKENS: int = 4096
+    GEMINI_TEMPERATURE: float = 0.2  # Lower for factual RAG responses
     
     # Google OAuth
     GOOGLE_CLIENT_ID: str
@@ -66,18 +66,6 @@ class Settings(BaseSettings):
             "https://www.googleapis.com/auth/gmail.readonly",
             "https://www.googleapis.com/auth/userinfo.email",
             "https://www.googleapis.com/auth/userinfo.profile"
-        ]
-    )
-    
-    # Microsoft OAuth
-    MICROSOFT_CLIENT_ID: str
-    MICROSOFT_CLIENT_SECRET: str
-    MICROSOFT_TENANT_ID: str = "common"
-    MICROSOFT_REDIRECT_URI: str
-    MICROSOFT_SCOPES: List[str] = Field(
-        default=[
-            "https://graph.microsoft.com/Mail.Read",
-            "https://graph.microsoft.com/User.Read"
         ]
     )
     
