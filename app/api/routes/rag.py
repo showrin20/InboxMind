@@ -171,3 +171,113 @@ async def rag_health():
             "status": "unhealthy",
             "error": str(e)
         }
+
+
+class EmailListItem(BaseModel):
+    """Email list item for display"""
+    id: str
+    message_id: str
+    subject: Optional[str] = None
+    sender: str
+    sender_name: Optional[str] = None
+    sent_at: str
+    has_attachments: bool = False
+    labels: Optional[str] = None
+
+
+class EmailListResponse(BaseModel):
+    """Response model for email list"""
+    emails: List[EmailListItem]
+    count: int
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "emails": [
+                    {
+                        "id": "abc123",
+                        "message_id": "<msg123@example.com>",
+                        "subject": "Q4 Budget Review",
+                        "sender": "cfo@company.com",
+                        "sender_name": "John CFO",
+                        "sent_at": "2024-11-15T10:30:00Z",
+                        "has_attachments": True,
+                        "labels": "finance,important"
+                    }
+                ],
+                "count": 1
+            }
+        }
+
+
+@router.get("/emails", response_model=EmailListResponse)
+async def get_emails(
+    request: Request,
+    limit: int = 5,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Get latest emails for the authenticated user.
+    
+    Returns up to `limit` (default 5) most recent emails.
+    
+    **Security**: Emails are scoped to the authenticated user only.
+    """
+    from sqlalchemy import select
+    from app.models.email import Email
+    
+    # TODO: Extract user_id and org_id from JWT token
+    user_id = "user_demo"
+    org_id = "org_demo"
+    request_id = request.state.request_id
+    
+    logger.info(f"Fetching emails: request_id={request_id}, user_id={user_id}, limit={limit}")
+    
+    try:
+        # Query emails for this user/org, ordered by sent_at descending
+        query = (
+            select(Email)
+            .where(Email.user_id == user_id)
+            .where(Email.org_id == org_id)
+            .order_by(Email.sent_at.desc())
+            .limit(limit)
+        )
+        
+        result = await db.execute(query)
+        emails = result.scalars().all()
+        
+        email_items = [
+            EmailListItem(
+                id=str(email.id),
+                message_id=email.message_id,
+                subject=email.subject,
+                sender=email.sender,
+                sender_name=email.sender_name,
+                sent_at=email.sent_at.isoformat() if email.sent_at else "",
+                has_attachments=email.has_attachments or False,
+                labels=email.labels
+            )
+            for email in emails
+        ]
+        
+        logger.info(f"Fetched {len(email_items)} emails: request_id={request_id}")
+        
+        return EmailListResponse(
+            emails=email_items,
+            count=len(email_items)
+        )
+        
+    except Exception as e:
+        logger.error(
+            f"Failed to fetch emails: request_id={request_id}, error={type(e).__name__}: {e}",
+            exc_info=True
+        )
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": "Failed to fetch emails",
+                "message": "An error occurred while fetching emails. Please try again.",
+                "request_id": request_id
+            }
+        )

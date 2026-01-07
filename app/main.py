@@ -18,7 +18,8 @@ from app.vectorstore.pinecone_client import get_pinecone_client
 
 # Import routers
 from app.api.routes import rag
-# from app.api.routes import oauth, emails, admin  # TODO: Implement OAuth and email routes
+from app.api.routes import emails
+from app.api.routes import auth
 
 settings = get_settings()
 
@@ -218,10 +219,9 @@ async def root():
 
 
 # Register routers
+app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["Auth"])
 app.include_router(rag.router, prefix=f"{settings.API_V1_PREFIX}/rag", tags=["RAG"])
-# app.include_router(oauth.router, prefix=f"{settings.API_V1_PREFIX}/oauth", tags=["OAuth"])  # TODO
-# app.include_router(emails.router, prefix=f"{settings.API_V1_PREFIX}/emails", tags=["Emails"])  # TODO
-# app.include_router(admin.router, prefix=f"{settings.API_V1_PREFIX}/admin", tags=["Admin"])  # TODO
+app.include_router(emails.router, prefix=f"{settings.API_V1_PREFIX}/emails", tags=["Emails"])
 
 
 if __name__ == "__main__":

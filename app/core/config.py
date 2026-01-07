@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     
     # Google Gemini
     GEMINI_API_KEY: Optional[str] = Field(default=None, min_length=20)
-    GEMINI_MODEL: str = "gemini-2.0-flash-exp"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     GEMINI_EMBEDDING_MODEL: str = "models/text-embedding-004"
     GEMINI_MAX_TOKENS: int = 4096
     GEMINI_TEMPERATURE: float = 0.2  # Lower for factual RAG responses

@@ -275,3 +275,107 @@ token_encryption = TokenEncryption()
 jwt_manager = JWTManager()
 password_manager = PasswordManager()
 security_utils = SecurityUtils()
+
+
+# Convenience functions
+def create_access_token(
+    data: Dict[str, Any],
+    expires_delta: Optional[timedelta] = None
+) -> str:
+    """
+    Create a JWT access token.
+    
+    Wrapper around JWTManager.create_access_token for easier imports.
+    """
+    return jwt_manager.create_access_token(data, expires_delta)
+
+
+async def get_current_user_id(request: "Request") -> str:
+    """
+    Extract and validate user ID from request JWT.
+    
+    Args:
+        request: FastAPI Request object
+        
+    Returns:
+        User ID string
+        
+    Raises:
+        HTTPException: If token is invalid or missing
+    """
+    from fastapi import HTTPException, status
+    
+    # Get token from Authorization header
+    auth_header = request.headers.get("Authorization")
+    
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid Authorization header",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    token = auth_header[7:]  # Remove "Bearer " prefix
+    
+    # Decode and validate token
+    payload = jwt_manager.decode_access_token(token)
+    
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    user_id = payload.get("sub")  # Standard JWT subject claim
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload"
+        )
+    
+    return user_id
+
+
+async def get_current_user(
+    request: "Request",
+    db: "AsyncSession"
+) -> "User":
+    """
+    Get the current authenticated user from request.
+    
+    Args:
+        request: FastAPI Request object
+        db: Database session
+        
+    Returns:
+        User model instance
+        
+    Raises:
+        HTTPException: If user not found or inactive
+    """
+    from fastapi import HTTPException, status
+    from sqlalchemy import select
+    from app.models.user import User
+    
+    user_id = await get_current_user_id(request)
+    
+    result = await db.execute(
+        select(User).where(User.id == user_id)
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive"
+        )
+    
+    return user
