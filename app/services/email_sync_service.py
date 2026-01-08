@@ -45,32 +45,43 @@ class EmailSyncService:
         """
         logger.info(f"Starting email sync for user {user.id}")
         
-        # Create Gmail fetcher with user's token
+        # Calculate sync date (ensure timezone-aware)
+        if user.last_email_sync:
+            # Ensure timezone-aware
+            if user.last_email_sync.tzinfo is None:
+                since_date = user.last_email_sync.replace(tzinfo=timezone.utc)
+            else:
+                since_date = user.last_email_sync
+        else:
+            since_date = datetime.now(timezone.utc) - timedelta(days=since_days)
+        
+        # Create Gmail fetcher with user's token (may refresh token)
         try:
             fetcher = await create_gmail_fetcher_for_user(db, user)
         except Exception as e:
             error_msg = f"Failed to create Gmail fetcher: {e}"
             logger.error(error_msg)
-            print(f"\n[EMAIL FETCH ERROR] {error_msg}")
             return 0, 0, [f"Authentication failed: {str(e)}"]
-        
-        # Calculate sync date
-        if user.last_email_sync:
-            since_date = user.last_email_sync
-        else:
-            since_date = datetime.now(timezone.utc) - timedelta(days=since_days)
         
         synced_count = 0
         skipped_count = 0
         errors = []
         
         try:
-            # Fetch emails from Gmail
+            # First, fetch all emails from Gmail (separate from DB operations)
+            logger.info(f"Fetching emails from Gmail since {since_date}")
+            fetched_emails = []
             async for parsed_email in fetcher.fetch_emails_since(
                 since_date=since_date,
                 max_results=max_emails,
                 label_ids=["INBOX"]  # Only inbox for now
             ):
+                fetched_emails.append(parsed_email)
+            
+            logger.info(f"Fetched {len(fetched_emails)} emails from Gmail")
+            
+            # Now process and save emails to database
+            for parsed_email in fetched_emails:
                 try:
                     # Check if email already exists
                     existing = await self._email_exists(
@@ -145,7 +156,8 @@ class EmailSyncService:
         self,
         parsed: ParsedEmail,
         org_id: str,
-        user_id: str
+        user_id: str,
+        provider: str = "google"
     ) -> Email:
         """Convert ParsedEmail to Email model"""
         return Email(
@@ -165,7 +177,9 @@ class EmailSyncService:
             body_html=parsed.body_html,
             has_attachments=parsed.has_attachments,
             attachment_count=parsed.attachment_count,
-            labels=",".join(parsed.labels) if parsed.labels else None
+            labels=",".join(parsed.labels) if parsed.labels else None,
+            provider=provider,
+            provider_message_id=parsed.message_id
         )
 
 

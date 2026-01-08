@@ -1,18 +1,33 @@
 """
 Auth API Routes
 Simple authentication for development/testing
+
+## How to Authenticate
+
+1. **Register or Login** to get an access token:
+   - POST /api/v1/auth/register {"email": "you@example.com", "password": "yourpassword"}
+   - POST /api/v1/auth/login {"email": "you@example.com", "password": "yourpassword"}
+
+2. **Use the token** in subsequent requests:
+   - Add header: `Authorization: Bearer <your_access_token>`
+
+3. **Example with curl**:
+   ```
+   curl -X GET http://localhost:8000/api/v1/emails \\
+     -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+   ```
 """
 import logging
 from typing import Optional
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.config import get_settings
-from app.core.security import JWTManager, PasswordManager
+from app.core.security import JWTManager, PasswordManager, get_current_user
 from app.db.session import get_async_db
 from app.models.user import User
 
@@ -31,18 +46,50 @@ class LoginRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    """Register request"""
+    """Register request - email and password only"""
     email: EmailStr
     password: str
-    org_id: str = "default"
 
 
 class TokenResponse(BaseModel):
-    """Token response"""
+    """
+    Token response - use this token for authenticated requests.
+    
+    Add to your requests as: Authorization: Bearer <access_token>
+    """
     access_token: str
     token_type: str = "bearer"
     user_id: str
     email: str
+    usage_example: str = "Add header 'Authorization: Bearer <access_token>' to your requests"
+
+
+class AuthHelpResponse(BaseModel):
+    """Authentication help"""
+    message: str
+    steps: list
+    example_curl: str
+
+
+@router.get("/help", response_model=AuthHelpResponse)
+async def auth_help():
+    """
+    Get help on how to authenticate with the API.
+    
+    Returns step-by-step instructions for getting and using access tokens.
+    """
+    return AuthHelpResponse(
+        message="How to authenticate with InboxMind API",
+        steps=[
+            "1. Register: POST /api/v1/auth/register with {\"email\": \"you@example.com\", \"password\": \"secret\"}",
+            "2. Copy the 'access_token' from the response",
+            "3. Add header to all requests: Authorization: Bearer <your_token>",
+            "4. Connect Gmail: GET /api/v1/oauth/google",
+            "5. Sync emails: POST /api/v1/emails/sync",
+            "6. Query emails: POST /api/v1/rag/query"
+        ],
+        example_curl="curl -X GET http://localhost:8000/api/v1/emails -H \"Authorization: Bearer YOUR_TOKEN_HERE\""
+    )
 
 
 @router.post("/register", response_model=TokenResponse)
@@ -65,10 +112,11 @@ async def register(
             detail="Email already registered"
         )
     
-    # Create user
+    # Create user with default org_id derived from email domain
+    email_domain = request.email.split('@')[1] if '@' in request.email else 'default'
     user = User(
         email=request.email,
-        org_id=request.org_id,
+        org_id=email_domain,
         hashed_password=password_manager.hash_password(request.password),
         is_active=True,
         email_sync_enabled=True
@@ -149,21 +197,41 @@ async def login(
     )
 
 
-@router.get("/me")
+class UserProfileResponse(BaseModel):
+    """User profile response"""
+    id: str
+    email: str
+    org_id: str
+    full_name: Optional[str] = None
+    is_active: bool
+    gmail_connected: bool
+    email_sync_enabled: bool
+
+
+@router.get("/me", response_model=UserProfileResponse)
 async def get_me(
+    request: Request,
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    Get current user info.
+    Get current authenticated user's profile.
     
-    This is a public endpoint that returns user info from a token.
-    Pass Authorization: Bearer <token> header.
+    **Requires**: Authorization header with Bearer token.
+    
+    Example:
+    ```
+    curl -X GET http://localhost:8000/api/v1/auth/me \\
+      -H "Authorization: Bearer <your_token>"
+    ```
     """
-    from fastapi import Request
-    from app.core.security import get_current_user
+    user = await get_current_user(request, db)
     
-    # This will be called from the route, we need request context
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Use /api/v1/auth/profile instead"
+    return UserProfileResponse(
+        id=str(user.id),
+        email=user.email,
+        org_id=user.org_id,
+        full_name=user.full_name,
+        is_active=user.is_active,
+        gmail_connected=bool(user.encrypted_access_token),
+        email_sync_enabled=user.email_sync_enabled
     )

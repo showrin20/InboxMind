@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
 import time
 import uuid
 
@@ -20,6 +21,7 @@ from app.vectorstore.pinecone_client import get_pinecone_client
 from app.api.routes import rag
 from app.api.routes import emails
 from app.api.routes import auth
+from app.api.routes import test as test_routes
 
 settings = get_settings()
 
@@ -73,12 +75,50 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Enterprise multi-tenant agentic RAG platform for email intelligence",
+    description="""
+## AI-powered email search and analysis.
+    """,
     version="1.0.0",
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
     lifespan=lifespan
 )
+
+
+def custom_openapi():
+    """Custom OpenAPI schema with security"""
+    if app.openapi_schema:
+        return app.openapi_schema
+    
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    
+    # Add security scheme
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Enter your JWT token from /auth/register or /auth/login"
+        }
+    }
+    
+    # Apply security to all endpoints except auth
+    for path in openapi_schema["paths"]:
+        if "/auth/register" not in path and "/auth/login" not in path and "/auth/help" not in path and "/health" not in path:
+            for method in openapi_schema["paths"][path]:
+                if method != "parameters":
+                    openapi_schema["paths"][path][method]["security"] = [{"BearerAuth": []}]
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 
 # CORS middleware
@@ -222,6 +262,15 @@ async def root():
 app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["Auth"])
 app.include_router(rag.router, prefix=f"{settings.API_V1_PREFIX}/rag", tags=["RAG"])
 app.include_router(emails.router, prefix=f"{settings.API_V1_PREFIX}/emails", tags=["Emails"])
+
+# Register test routes only in development mode
+if settings.DEBUG or settings.APP_ENV == "development":
+    app.include_router(
+        test_routes.router, 
+        prefix=f"{settings.API_V1_PREFIX}/test", 
+        tags=["Test (No Auth)"]
+    )
+    logger.warning("Test routes enabled - these bypass authentication!")
 
 
 if __name__ == "__main__":

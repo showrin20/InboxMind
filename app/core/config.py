@@ -143,17 +143,31 @@ class Settings(BaseSettings):
     def get_database_url(self, async_driver: bool = True) -> str:
         """
         Get database URL with appropriate driver.
-        Production: PostgreSQL with asyncpg
-        Development: Can use SQLite with aiosqlite
+        Production: PostgreSQL with asyncpg (async) or psycopg2 (sync)
+        Development: Can use SQLite with aiosqlite (async) or sqlite3 (sync)
+        
+        Args:
+            async_driver: If True, returns async driver URL. If False, returns sync driver URL.
         """
         url = self.DATABASE_URL
         
-        # Ensure async driver is used
         if async_driver:
+            # Convert to async drivers
             if url.startswith("postgresql://"):
                 url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            elif url.startswith("postgresql+psycopg2://"):
+                url = url.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
             elif url.startswith("sqlite:///"):
                 url = url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+        else:
+            # Convert to sync drivers (for Alembic migrations)
+            if url.startswith("postgresql+asyncpg://"):
+                url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
+            elif url.startswith("sqlite+aiosqlite:///"):
+                url = url.replace("sqlite+aiosqlite:///", "sqlite:///", 1)
+            elif url.startswith("postgresql://"):
+                # Already sync, leave as is (uses psycopg2 by default)
+                pass
         
         return url
 

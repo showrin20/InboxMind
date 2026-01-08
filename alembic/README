@@ -1,0 +1,20 @@
+Generic single-database configuration.
+
+
+# Check migration status
+alembic current
+
+# View migration history
+alembic history
+
+# Create new migration (autogenerate from model changes)
+alembic revision --autogenerate -m "description"
+
+# Apply all pending migrations
+alembic upgrade head
+
+# Rollback one migration
+alembic downgrade -1
+
+# Check for pending changes
+alembic check

@@ -1,14 +1,34 @@
 """
 RAG Query API Endpoint
 POST /api/v1/rag/query
+
+## AI-Powered Email Search
+
+This endpoint allows you to ask natural language questions about your emails.
+
+**Prerequisites:**
+1. Authenticate via /api/v1/auth/login or /api/v1/auth/register
+2. Connect Gmail via /api/v1/oauth/google
+3. Sync emails via POST /api/v1/emails/sync
+
+**Example queries:**
+- "What decisions were made about the Q4 budget?"
+- "Find emails from John about the project deadline"
+- "Summarize my conversations with the marketing team last week"
 """
 from typing import Optional, List, Dict, Any
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 
 from app.db.session import get_async_db
+from app.models.email import Email
+from app.models.user import User
 from app.services.rag_service import get_rag_service
+from app.core.security import get_current_user
 from app.core.logging import audit_logger
 import logging
 
@@ -27,7 +47,7 @@ class RAGQueryRequest(BaseModel):
     )
     filters: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="Optional filters for date_from, date_to, sender"
+        description="Optional filters: date_from, date_to, sender"
     )
     
     class Config:
@@ -46,7 +66,7 @@ class RAGQueryRequest(BaseModel):
 class EmailSource(BaseModel):
     """Email source citation model"""
     email_id: str
-    subject: str
+    subject: Optional[str] = None
     sender: str
     date: str
     relevance_score: Optional[float] = None
@@ -80,6 +100,55 @@ class RAGQueryResponse(BaseModel):
         }
 
 
+class RAGStatusResponse(BaseModel):
+    """RAG service status"""
+    ready: bool
+    email_count: int
+    gmail_connected: bool
+    message: str
+    next_steps: List[str]
+
+
+@router.get("/status", response_model=RAGStatusResponse)
+async def rag_status(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Check if RAG service is ready for queries.
+    
+    Returns status of Gmail connection and synced emails.
+    """
+    user = await get_current_user(request, db)
+    
+    # Check email count
+    count_query = select(func.count(Email.id)).where(
+        Email.user_id == str(user.id),
+        Email.org_id == user.org_id
+    )
+    result = await db.execute(count_query)
+    email_count = result.scalar() or 0
+    
+    gmail_connected = bool(user.encrypted_access_token)
+    ready = gmail_connected and email_count > 0
+    
+    next_steps = []
+    if not gmail_connected:
+        next_steps.append("Connect Gmail: GET /api/v1/oauth/google")
+    if email_count == 0:
+        next_steps.append("Sync emails: POST /api/v1/emails/sync")
+    if ready:
+        next_steps.append("Ready! Use POST /api/v1/rag/query to ask questions")
+    
+    return RAGStatusResponse(
+        ready=ready,
+        email_count=email_count,
+        gmail_connected=gmail_connected,
+        message="Ready to answer questions about your emails" if ready else "Setup incomplete",
+        next_steps=next_steps
+    )
+
+
 @router.post("/query", response_model=RAGQueryResponse)
 async def rag_query(
     request_body: RAGQueryRequest,
@@ -98,17 +167,53 @@ async def rag_query(
     **Security**: Query is automatically scoped to the authenticated user's emails only.
     **Compliance**: PII is redacted if configured.
     **Grounding**: All answers cite source emails. Refuses if context insufficient.
+    
+    **Prerequisites:**
+    1. Must be authenticated with Bearer token
+    2. Gmail must be connected via /api/v1/oauth/google
+    3. Emails must be synced via POST /api/v1/emails/sync
     """
-    # TODO: Extract user_id and org_id from JWT token
-    # For now using placeholder values - implement JWT auth middleware
-    user_id = "user_demo"  # Extract from JWT: request.state.user_id
-    org_id = "org_demo"    # Extract from JWT: request.state.org_id
-    request_id = request.state.request_id
+    # Get authenticated user
+    user = await get_current_user(request, db)
+    user_id = str(user.id)
+    org_id = user.org_id
+    request_id = getattr(request.state, "request_id", "unknown")
     
     logger.info(
         f"RAG query received: request_id={request_id}, "
         f"query={request_body.query[:100]}, user_id={user_id}"
     )
+    
+    # Check prerequisites
+    if not user.encrypted_access_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "Gmail not connected",
+                "message": "You need to connect Gmail before querying emails.",
+                "how_to_fix": "Visit GET /api/v1/oauth/google to connect Gmail.",
+                "oauth_url": "/api/v1/oauth/google"
+            }
+        )
+    
+    # Check if user has emails
+    count_query = select(func.count(Email.id)).where(
+        Email.user_id == user_id,
+        Email.org_id == org_id
+    )
+    result = await db.execute(count_query)
+    email_count = result.scalar() or 0
+    
+    if email_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "No emails synced",
+                "message": "You need to sync emails before querying.",
+                "how_to_fix": "Call POST /api/v1/emails/sync to fetch your emails.",
+                "sync_url": "/api/v1/emails/sync"
+            }
+        )
     
     try:
         # Parse filters
@@ -153,7 +258,11 @@ async def rag_query(
 
 @router.get("/health")
 async def rag_health():
-    """RAG service health check"""
+    """
+    RAG service health check.
+    
+    Returns status of RAG components (no authentication required).
+    """
     try:
         # Could check CrewAI, Pinecone, embeddings service
         return {
@@ -171,113 +280,3 @@ async def rag_health():
             "status": "unhealthy",
             "error": str(e)
         }
-
-
-class EmailListItem(BaseModel):
-    """Email list item for display"""
-    id: str
-    message_id: str
-    subject: Optional[str] = None
-    sender: str
-    sender_name: Optional[str] = None
-    sent_at: str
-    has_attachments: bool = False
-    labels: Optional[str] = None
-
-
-class EmailListResponse(BaseModel):
-    """Response model for email list"""
-    emails: List[EmailListItem]
-    count: int
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "emails": [
-                    {
-                        "id": "abc123",
-                        "message_id": "<msg123@example.com>",
-                        "subject": "Q4 Budget Review",
-                        "sender": "cfo@company.com",
-                        "sender_name": "John CFO",
-                        "sent_at": "2024-11-15T10:30:00Z",
-                        "has_attachments": True,
-                        "labels": "finance,important"
-                    }
-                ],
-                "count": 1
-            }
-        }
-
-
-@router.get("/emails", response_model=EmailListResponse)
-async def get_emails(
-    request: Request,
-    limit: int = 5,
-    db: AsyncSession = Depends(get_async_db)
-):
-    """
-    Get latest emails for the authenticated user.
-    
-    Returns up to `limit` (default 5) most recent emails.
-    
-    **Security**: Emails are scoped to the authenticated user only.
-    """
-    from sqlalchemy import select
-    from app.models.email import Email
-    
-    # TODO: Extract user_id and org_id from JWT token
-    user_id = "user_demo"
-    org_id = "org_demo"
-    request_id = request.state.request_id
-    
-    logger.info(f"Fetching emails: request_id={request_id}, user_id={user_id}, limit={limit}")
-    
-    try:
-        # Query emails for this user/org, ordered by sent_at descending
-        query = (
-            select(Email)
-            .where(Email.user_id == user_id)
-            .where(Email.org_id == org_id)
-            .order_by(Email.sent_at.desc())
-            .limit(limit)
-        )
-        
-        result = await db.execute(query)
-        emails = result.scalars().all()
-        
-        email_items = [
-            EmailListItem(
-                id=str(email.id),
-                message_id=email.message_id,
-                subject=email.subject,
-                sender=email.sender,
-                sender_name=email.sender_name,
-                sent_at=email.sent_at.isoformat() if email.sent_at else "",
-                has_attachments=email.has_attachments or False,
-                labels=email.labels
-            )
-            for email in emails
-        ]
-        
-        logger.info(f"Fetched {len(email_items)} emails: request_id={request_id}")
-        
-        return EmailListResponse(
-            emails=email_items,
-            count=len(email_items)
-        )
-        
-    except Exception as e:
-        logger.error(
-            f"Failed to fetch emails: request_id={request_id}, error={type(e).__name__}: {e}",
-            exc_info=True
-        )
-        
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "error": "Failed to fetch emails",
-                "message": "An error occurred while fetching emails. Please try again.",
-                "request_id": request_id
-            }
-        )

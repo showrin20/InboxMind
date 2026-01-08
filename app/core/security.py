@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 from cryptography.fernet import Fernet
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
 import secrets
 import hashlib
 import logging
@@ -15,9 +15,6 @@ from app.core.config import get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
-
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Fernet encryption for OAuth tokens
 try:
@@ -180,17 +177,25 @@ class JWTManager:
 
 
 class PasswordManager:
-    """Password hashing and verification"""
+    """Password hashing and verification using bcrypt directly"""
     
     @staticmethod
     def hash_password(password: str) -> str:
         """Hash a password using bcrypt"""
-        return pwd_context.hash(password)
+        # Encode password, truncate to 72 bytes (bcrypt limit)
+        password_bytes = password.encode('utf-8')[:72]
+        salt = bcrypt.gensalt(rounds=12)
+        return bcrypt.hashpw(password_bytes, salt).decode('utf-8')
     
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
         """Verify a password against its hash"""
-        return pwd_context.verify(plain_password, hashed_password)
+        try:
+            password_bytes = plain_password.encode('utf-8')[:72]
+            hashed_bytes = hashed_password.encode('utf-8')
+            return bcrypt.checkpw(password_bytes, hashed_bytes)
+        except Exception:
+            return False
 
 
 class SecurityUtils:
@@ -308,14 +313,43 @@ async def get_current_user_id(request: "Request") -> str:
     # Get token from Authorization header
     auth_header = request.headers.get("Authorization")
     
-    if not auth_header or not auth_header.startswith("Bearer "):
+    if not auth_header:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid Authorization header",
+            detail={
+                "error": "Authentication required",
+                "message": "No Authorization header provided. Please include a valid JWT token.",
+                "how_to_fix": "Add header 'Authorization: Bearer <your_token>'",
+                "get_token": "POST /api/v1/auth/login with email and password, or POST /api/v1/auth/register to create an account"
+            },
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "Invalid authorization format",
+                "message": "Authorization header must use Bearer token format.",
+                "how_to_fix": "Use format 'Authorization: Bearer <your_token>'",
+                "received": f"'{auth_header[:20]}...'" if len(auth_header) > 20 else f"'{auth_header}'"
+            },
             headers={"WWW-Authenticate": "Bearer"}
         )
     
     token = auth_header[7:]  # Remove "Bearer " prefix
+    
+    if not token or token.strip() == "":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "Empty token",
+                "message": "Bearer token is empty.",
+                "how_to_fix": "Provide a valid JWT token after 'Bearer '",
+                "get_token": "POST /api/v1/auth/login with email and password"
+            },
+            headers={"WWW-Authenticate": "Bearer"}
+        )
     
     # Decode and validate token
     payload = jwt_manager.decode_access_token(token)
@@ -323,7 +357,12 @@ async def get_current_user_id(request: "Request") -> str:
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
+            detail={
+                "error": "Invalid or expired token",
+                "message": "The provided JWT token is invalid, malformed, or has expired.",
+                "how_to_fix": "Obtain a new token by logging in again",
+                "get_token": "POST /api/v1/auth/login with email and password"
+            },
             headers={"WWW-Authenticate": "Bearer"}
         )
     
@@ -332,7 +371,12 @@ async def get_current_user_id(request: "Request") -> str:
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload"
+            detail={
+                "error": "Invalid token payload",
+                "message": "Token does not contain required user information.",
+                "how_to_fix": "The token may be from an older version. Please login again to get a new token.",
+                "get_token": "POST /api/v1/auth/login with email and password"
+            }
         )
     
     return user_id
@@ -369,13 +413,22 @@ async def get_current_user(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            detail={
+                "error": "User not found",
+                "message": "The user associated with this token no longer exists.",
+                "how_to_fix": "Register a new account or contact support if this is unexpected.",
+                "register": "POST /api/v1/auth/register with email, password, and org_id"
+            }
         )
     
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive"
+            detail={
+                "error": "Account inactive",
+                "message": "Your user account has been deactivated.",
+                "how_to_fix": "Contact your administrator to reactivate your account."
+            }
         )
     
     return user

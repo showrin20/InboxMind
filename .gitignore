@@ -41,6 +41,7 @@ env/
 *.db
 *.sqlite
 *.sqlite3
+inboxmind.db
 
 # Logs
 *.log
@@ -65,3 +66,13 @@ htmlcov/
 
 # Docker
 docker-compose.override.yml
+
+# Redis
+dump.rdb
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Alembic (keep versions tracked, ignore cache)
+alembic/versions/__pycache__/

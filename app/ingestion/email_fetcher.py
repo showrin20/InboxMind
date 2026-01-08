@@ -353,13 +353,56 @@ async def create_gmail_fetcher_for_user(
         AuthenticationError: If token refresh fails
     """
     from app.services.token_service import get_token_service
+    from datetime import timedelta, timezone
     
     token_service = get_token_service()
-    access_token = await token_service.get_valid_access_token(db, user)
     
-    if not access_token:
-        error_msg = f"No valid access token for user {user.id}"
-        print(f"\n[EMAIL FETCH ERROR] {error_msg}")
-        raise AuthenticationError(error_msg)
+    # Check if we have an encrypted token
+    if not user.encrypted_access_token:
+        raise AuthenticationError(f"No access token for user {user.id}")
     
-    return GmailFetcher(access_token)
+    # Check if token is still valid (with buffer)
+    buffer = timedelta(seconds=300)  # 5 minute buffer
+    now = datetime.now(timezone.utc)
+    
+    token_expires = user.token_expires_at
+    needs_refresh = True
+    
+    if token_expires:
+        if token_expires.tzinfo is None:
+            token_expires = token_expires.replace(tzinfo=timezone.utc)
+        needs_refresh = (token_expires - buffer) <= now
+    
+    if not needs_refresh:
+        # Token is still valid, just decrypt and use it
+        access_token = token_service.decrypt_token(user.encrypted_access_token)
+        return GmailFetcher(access_token)
+    
+    # Token needs refresh - do it outside SQLAlchemy context
+    logger.info(f"Access token needs refresh for user {user.id}")
+    
+    if not user.encrypted_refresh_token:
+        raise AuthenticationError(f"No refresh token for user {user.id}")
+    
+    refresh_token = token_service.decrypt_token(user.encrypted_refresh_token)
+    
+    # Refresh token using aiohttp (outside of any DB operation)
+    new_tokens = await token_service.refresh_google_token(refresh_token)
+    
+    if not new_tokens:
+        raise AuthenticationError(f"Token refresh failed for user {user.id}")
+    
+    new_access_token, new_refresh_token, expires_in = new_tokens
+    
+    # Store new tokens in database
+    user.encrypted_access_token = token_service.encrypt_token(new_access_token)
+    if new_refresh_token:
+        user.encrypted_refresh_token = token_service.encrypt_token(new_refresh_token)
+    user.token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+    
+    db.add(user)
+    await db.commit()
+    
+    logger.info(f"Token refreshed for user {user.id}")
+    
+    return GmailFetcher(new_access_token)

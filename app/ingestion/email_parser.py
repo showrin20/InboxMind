@@ -187,10 +187,15 @@ class EmailParser:
         parsed.recipients_cc = self._parse_address_list(headers.get("cc", ""))
         parsed.recipients_bcc = self._parse_address_list(headers.get("bcc", ""))
         
-        # Parse date
+        # Parse date (ensure timezone-aware)
         if headers.get("date"):
             try:
-                parsed.sent_at = parsedate_to_datetime(headers["date"])
+                dt = parsedate_to_datetime(headers["date"])
+                # Ensure timezone-aware
+                if dt.tzinfo is None:
+                    parsed.sent_at = dt.replace(tzinfo=timezone.utc)
+                else:
+                    parsed.sent_at = dt
             except Exception:
                 parsed.sent_at = datetime.now(timezone.utc)
         
@@ -232,10 +237,15 @@ class EmailParser:
         if msg.get("References"):
             parsed.references = msg["References"].split()
         
-        # Parse date
+        # Parse date (ensure timezone-aware)
         if msg.get("Date"):
             try:
-                parsed.sent_at = parsedate_to_datetime(msg["Date"])
+                dt = parsedate_to_datetime(msg["Date"])
+                # Ensure timezone-aware
+                if dt.tzinfo is None:
+                    parsed.sent_at = dt.replace(tzinfo=timezone.utc)
+                else:
+                    parsed.sent_at = dt
             except Exception:
                 parsed.sent_at = datetime.now(timezone.utc)
         
