@@ -24,6 +24,15 @@ from app.services.rag_service import get_rag_service
 from app.services.email_sync_service import get_email_sync_service
 from app.services.token_service import get_token_service
 from app.core.config import get_settings
+from app.ui import (
+    get_connect_gmail_page,
+    get_email_list_page,
+    get_email_detail_page,
+    get_oauth_error_page,
+    get_oauth_success_page,
+    get_oauth_missing_params_page,
+    get_oauth_invalid_state_page,
+)
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -185,11 +194,18 @@ async def test_info(request: Request):
             "GET /api/v1/test/connect-gmail": "Start Gmail OAuth flow (opens consent screen)",
             "GET /api/v1/test/oauth/start": "Redirects to Google OAuth consent page",
             "GET /api/v1/test/oauth/callback": "OAuth callback handler (internal)",
-            "GET /api/v1/test/emails": "List emails (no auth required)",
-            "GET /api/v1/test/emails/{email_id}": "Get email details (no auth required)",
+            "GET /api/v1/test/emails": "List emails JSON (no auth required)",
+            "GET /api/v1/test/emails/{email_id}": "Get email details JSON (no auth required)",
             "GET /api/v1/test/emails/count/summary": "Get email count summary",
             "POST /api/v1/test/rag/query": "Execute RAG query (no auth required)",
-            "GET /api/v1/test/users": "List all users in system"
+            "GET /api/v1/test/users": "List all users in system",
+            "GET /api/v1/test/ui/emails": "📧 View emails in HTML UI (no auth required)",
+            "GET /api/v1/test/ui/emails/{email_id}": "📧 View email detail in HTML UI (no auth required)"
+        },
+        "ui_pages": {
+            "connect_gmail": f"{base_url}/api/v1/test/connect-gmail",
+            "email_list": f"{base_url}/api/v1/test/ui/emails",
+            "email_detail": f"{base_url}/api/v1/test/ui/emails/{{email_id}}"
         },
         "instructions": [
             "Step 1: Open your browser and go to /api/v1/test/connect-gmail",
@@ -198,13 +214,14 @@ async def test_info(request: Request):
             "Step 4: Review and approve the Gmail read permissions",
             "Step 5: After authorization, emails from the last 30 days will sync automatically",
             "Step 6: You'll see a success page with your user_id and org_id",
-            "Step 7: Use those credentials to query emails via /api/v1/test/emails"
+            "Step 7: View your emails at /api/v1/test/ui/emails"
         ],
         "next_steps": {
             "1_connect_gmail": f"{base_url}/api/v1/test/connect-gmail",
-            "2_list_emails": f"{base_url}/api/v1/test/emails?limit=20",
-            "3_check_email_count": f"{base_url}/api/v1/test/emails/count/summary",
-            "4_rag_query": f"{base_url}/api/v1/test/rag/query"
+            "2_view_emails_ui": f"{base_url}/api/v1/test/ui/emails",
+            "3_list_emails_json": f"{base_url}/api/v1/test/emails?limit=20",
+            "4_check_email_count": f"{base_url}/api/v1/test/emails/count/summary",
+            "5_rag_query": f"{base_url}/api/v1/test/rag/query"
         },
         "quick_start": f"Open {base_url}/api/v1/test/connect-gmail in your browser to authorize Gmail access and sync emails"
     })
@@ -220,63 +237,11 @@ async def test_connect_gmail_page(request: Request):
     This page explains what permissions are requested and provides
     a button to start the OAuth flow.
     """
-    html_content = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Connect Gmail - InboxMind Test</title>
-        <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-                   max-width: 600px; margin: 50px auto; padding: 20px; background: #f5f5f5; }
-            .card { background: white; border-radius: 12px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-            h1 { color: #1a73e8; margin-top: 0; }
-            .btn { display: inline-block; background: #1a73e8; color: white; padding: 12px 24px; 
-                   border-radius: 6px; text-decoration: none; font-weight: 500; margin-top: 20px; }
-            .btn:hover { background: #1557b0; }
-            .warning { background: #fff3cd; border: 1px solid #ffc107; padding: 15px; 
-                       border-radius: 6px; margin: 20px 0; }
-            .permissions { background: #e8f5e9; padding: 15px; border-radius: 6px; margin: 20px 0; }
-            ul { padding-left: 20px; }
-            li { margin: 8px 0; }
-            .footer { margin-top: 20px; font-size: 12px; color: #666; }
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <h1>🔗 Connect Your Gmail</h1>
-            <p>InboxMind needs access to your Gmail to fetch and analyze your emails using AI.</p>
-            
-            <div class="permissions">
-                <strong>✓ Permissions requested:</strong>
-                <ul>
-                    <li><strong>Read your emails</strong> - To fetch and index email content</li>
-                    <li><strong>View your email address</strong> - To identify your account</li>
-                    <li><strong>View your profile info</strong> - To personalize your experience</li>
-                </ul>
-            </div>
-            
-            <div class="warning">
-                ⚠️ <strong>Test Mode:</strong> This is for development testing only. 
-                Emails will be synced to a local database.
-            </div>
-            
-            <p><strong>What happens next:</strong></p>
-            <ol>
-                <li>You'll be redirected to Google's consent screen</li>
-                <li>Review and approve the permissions</li>
-                <li>We'll automatically sync your recent emails (last 30 days)</li>
-                <li>You can then query your emails via the test endpoints</li>
-            </ol>
-            
-            <a href="/api/v1/test/oauth/start" class="btn">🚀 Connect Gmail Account</a>
-            
-            <div class="footer">
-                <p>By connecting, you agree to let InboxMind access your Gmail data for testing purposes.</p>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
+    html_content = get_connect_gmail_page(
+        oauth_start_url="/api/v1/test/oauth/start",
+        is_test=True,
+        is_connected=False
+    )
     return HTMLResponse(content=html_content)
 
 
@@ -337,41 +302,25 @@ async def test_oauth_callback(
     # Handle OAuth errors
     if error:
         logger.warning(f"[TEST] OAuth error: {error}")
-        return HTMLResponse(content=f"""
-        <!DOCTYPE html>
-        <html>
-        <head><title>OAuth Error</title>
-        <style>body {{ font-family: sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }}
-        .error {{ background: #ffebee; border: 1px solid #f44336; padding: 20px; border-radius: 8px; }}</style>
-        </head>
-        <body>
-            <div class="error">
-                <h2>❌ OAuth Failed</h2>
-                <p><strong>Error:</strong> {error}</p>
-                <p><a href="/api/v1/test/connect-gmail">Try again</a></p>
-            </div>
-        </body>
-        </html>
-        """)
+        return HTMLResponse(content=get_oauth_error_page(
+            error=error,
+            retry_url="/api/v1/test/connect-gmail",
+            is_test=True
+        ))
     
     if not code or not state:
-        return HTMLResponse(content="""
-        <html><body>
-            <h2>❌ Missing OAuth parameters</h2>
-            <p><a href="/api/v1/test/connect-gmail">Try again</a></p>
-        </body></html>
-        """)
+        return HTMLResponse(content=get_oauth_missing_params_page(
+            retry_url="/api/v1/test/connect-gmail",
+            is_test=True
+        ))
     
     # Verify state token
     if state not in _test_oauth_states:
         logger.warning(f"[TEST] Invalid OAuth state: {state[:8]}...")
-        return HTMLResponse(content="""
-        <html><body>
-            <h2>❌ Invalid state token</h2>
-            <p>This may happen if you refreshed the page or the link expired.</p>
-            <p><a href="/api/v1/test/connect-gmail">Try again</a></p>
-        </body></html>
-        """)
+        return HTMLResponse(content=get_oauth_invalid_state_page(
+            retry_url="/api/v1/test/connect-gmail",
+            is_test=True
+        ))
     
     del _test_oauth_states[state]
     
@@ -497,93 +446,22 @@ async def test_oauth_callback(
         )
         
         # Return success page (using captured values to avoid greenlet errors)
-        return HTMLResponse(content=f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Gmail Connected - InboxMind</title>
-            <style>
-                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-                       max-width: 700px; margin: 50px auto; padding: 20px; background: #f5f5f5; }}
-                .card {{ background: white; border-radius: 12px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-                h1 {{ color: #34a853; margin-top: 0; }}
-                .success {{ background: #e8f5e9; border: 1px solid #4caf50; padding: 15px; border-radius: 6px; margin: 20px 0; }}
-                .info {{ background: #e3f2fd; padding: 15px; border-radius: 6px; margin: 15px 0; }}
-                .stats {{ display: flex; gap: 20px; margin: 20px 0; }}
-                .stat {{ background: #f5f5f5; padding: 15px; border-radius: 8px; flex: 1; text-align: center; }}
-                .stat-number {{ font-size: 32px; font-weight: bold; color: #1a73e8; }}
-                .stat-label {{ font-size: 12px; color: #666; }}
-                code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 4px; font-size: 14px; }}
-                .btn {{ display: inline-block; background: #1a73e8; color: white; padding: 10px 20px; 
-                       border-radius: 6px; text-decoration: none; margin: 5px; }}
-                .btn-secondary {{ background: #f5f5f5; color: #333; }}
-                pre {{ background: #f5f5f5; padding: 15px; border-radius: 6px; overflow-x: auto; }}
-            </style>
-        </head>
-        <body>
-            <div class="card">
-                <h1>✅ Gmail Connected Successfully!</h1>
-                
-                <div class="success">
-                    <strong>Welcome, {full_name or email}!</strong><br>
-                    Your Gmail has been connected and emails are synced.
-                </div>
-                
-                <div class="stats">
-                    <div class="stat">
-                        <div class="stat-number">{synced_count}</div>
-                        <div class="stat-label">Emails Synced</div>
-                    </div>
-                    <div class="stat">
-                        <div class="stat-number">{skipped_count}</div>
-                        <div class="stat-label">Already Existed</div>
-                    </div>
-                </div>
-                
-                <div class="info">
-                    <strong>Your test credentials:</strong><br>
-                    <code>user_id: {user_id_str}</code><br>
-                    <code>org_id: {user_org_id}</code><br>
-                    <code>email: {user_email}</code>
-                </div>
-                
-                <h3>🎯 Try these endpoints:</h3>
-                
-                <p><strong>List your emails:</strong></p>
-                <pre>GET /api/v1/test/emails?user_id={user_id_str}&org_id={user_org_id}</pre>
-                
-                <p><strong>Query with RAG:</strong></p>
-                <pre>POST /api/v1/test/rag/query
-{{
-  "query": "What are my recent emails about?",
-  "user_id": "{user_id_str}",
-  "org_id": "{user_org_id}"
-}}</pre>
-                
-                <div style="margin-top: 25px;">
-                    <a href="/api/v1/test/emails?user_id={user_id_str}&org_id={user_org_id}" class="btn">📧 View Emails</a>
-                    <a href="/docs" class="btn btn-secondary">📖 API Docs</a>
-                </div>
-                
-                {f'<p style="color: #f44336; margin-top: 20px;">⚠️ Sync errors: {", ".join(sync_errors[:3])}</p>' if sync_errors else ''}
-            </div>
-        </body>
-        </html>
-        """)
+        return HTMLResponse(content=get_oauth_success_page(
+            user_email=user_email,
+            user_id=user_id_str,
+            org_id=user_org_id,
+            synced_count=synced_count,
+            emails_url=f"/api/v1/test/emails?user_id={user_id_str}&org_id={user_org_id}",
+            is_test=True
+        ))
         
     except Exception as e:
         logger.error(f"[TEST] OAuth callback failed: {e}", exc_info=True)
-        return HTMLResponse(content=f"""
-        <!DOCTYPE html>
-        <html>
-        <head><title>Error</title></head>
-        <body style="font-family: sans-serif; max-width: 600px; margin: 50px auto;">
-            <h2>❌ Something went wrong</h2>
-            <p>Error: {str(e)}</p>
-            <p><a href="/api/v1/test/connect-gmail">Try again</a></p>
-        </body>
-        </html>
-        """)
+        return HTMLResponse(content=get_oauth_error_page(
+            error=str(e),
+            retry_url="/api/v1/test/connect-gmail",
+            is_test=True
+        ))
 
 
 @router.get("/users")
@@ -1004,3 +882,131 @@ async def test_email_count(
                 "message": str(e)
             }
         )
+
+
+# ============== HTML UI Endpoints for Testing ==============
+
+@router.get("/ui/emails", response_class=HTMLResponse)
+async def test_email_list_ui(
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    user_id: Optional[str] = Query(default=None, description="Override test user_id"),
+    org_id: Optional[str] = Query(default=None, description="Override test org_id"),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Show email list page UI (NO AUTHENTICATION REQUIRED).
+    
+    Displays paginated list of emails in a user-friendly HTML page.
+    Uses demo user/org by default, or custom user_id/org_id if provided.
+    """
+    test_user_id = user_id or DEMO_USER_ID
+    test_org_id = org_id or DEMO_ORG_ID
+    
+    # Get total count
+    count_query = select(func.count(Email.id)).where(
+        Email.user_id == test_user_id,
+        Email.org_id == test_org_id
+    )
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+    
+    # Get emails
+    query = (
+        select(Email)
+        .where(Email.user_id == test_user_id, Email.org_id == test_org_id)
+        .order_by(Email.sent_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    
+    result = await db.execute(query)
+    emails = result.scalars().all()
+    
+    email_list = [
+        {
+            "id": str(email.id),
+            "message_id": email.message_id,
+            "subject": email.subject,
+            "sender": email.sender,
+            "sender_name": email.sender_name,
+            "sent_at": email.sent_at.isoformat() if email.sent_at else "",
+            "has_attachments": email.has_attachments or False,
+            "labels": email.labels
+        }
+        for email in emails
+    ]
+    
+    html_content = get_email_list_page(
+        emails=email_list,
+        total=total,
+        offset=offset,
+        limit=limit,
+        user_id=test_user_id,
+        org_id=test_org_id,
+        base_url="/api/v1/test/ui/emails",
+        is_test=True
+    )
+    return HTMLResponse(content=html_content)
+
+
+@router.get("/ui/emails/{email_id}", response_class=HTMLResponse)
+async def test_email_detail_ui(
+    email_id: str,
+    request: Request,
+    user_id: Optional[str] = Query(default=None, description="Override test user_id"),
+    org_id: Optional[str] = Query(default=None, description="Override test org_id"),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Show email detail page UI (NO AUTHENTICATION REQUIRED).
+    
+    Displays full email content in a user-friendly HTML page.
+    Uses demo user/org by default, or custom user_id/org_id if provided.
+    """
+    test_user_id = user_id or DEMO_USER_ID
+    test_org_id = org_id or DEMO_ORG_ID
+    
+    # Get email (with tenant isolation)
+    query = select(Email).where(
+        Email.id == email_id,
+        Email.user_id == test_user_id,
+        Email.org_id == test_org_id
+    )
+    
+    result = await db.execute(query)
+    email = result.scalar_one_or_none()
+    
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Email not found"
+        )
+    
+    email_data = {
+        "id": str(email.id),
+        "message_id": email.message_id,
+        "thread_id": email.thread_id,
+        "subject": email.subject,
+        "sender": email.sender,
+        "sender_name": email.sender_name,
+        "recipients_to": email.recipients_to,
+        "recipients_cc": email.recipients_cc,
+        "sent_at": email.sent_at.isoformat() if email.sent_at else "",
+        "body_text": email.body_text,
+        "body_html": email.body_html,
+        "has_attachments": email.has_attachments or False,
+        "attachment_count": email.attachment_count or 0,
+        "labels": email.labels
+    }
+    
+    # Build back URL with query params
+    back_url = f"/api/v1/test/ui/emails?user_id={test_user_id}&org_id={test_org_id}"
+    
+    html_content = get_email_detail_page(
+        email=email_data,
+        back_url=back_url,
+        is_test=True
+    )
+    return HTMLResponse(content=html_content)

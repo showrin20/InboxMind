@@ -21,6 +21,7 @@ from app.vectorstore.pinecone_client import get_pinecone_client
 from app.api.routes import rag
 from app.api.routes import emails
 from app.api.routes import auth
+from app.api.routes import oauth
 from app.api.routes import test as test_routes
 
 settings = get_settings()
@@ -260,6 +261,7 @@ async def root():
 
 # Register routers
 app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["Auth"])
+app.include_router(oauth.router, prefix=f"{settings.API_V1_PREFIX}/oauth", tags=["OAuth"])
 app.include_router(rag.router, prefix=f"{settings.API_V1_PREFIX}/rag", tags=["RAG"])
 app.include_router(emails.router, prefix=f"{settings.API_V1_PREFIX}/emails", tags=["Emails"])
 

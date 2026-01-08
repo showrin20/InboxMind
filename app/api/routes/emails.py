@@ -28,6 +28,7 @@ from typing import Optional, List
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -37,6 +38,11 @@ from app.models.email import Email
 from app.models.user import User
 from app.core.security import get_current_user
 from app.services.email_sync_service import get_email_sync_service
+from app.ui import (
+    get_connect_gmail_page,
+    get_email_list_page,
+    get_email_detail_page,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +117,7 @@ async def gmail_connection_guide(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    Get instructions for connecting Gmail.
+    Get instructions for connecting Gmail (JSON response).
     
     Returns step-by-step guide for linking your Google account
     to enable email sync and RAG queries.
@@ -146,6 +152,28 @@ async def gmail_connection_guide(
         ],
         oauth_url="/api/v1/oauth/google"
     )
+
+
+@router.get("/connect-guide/ui", response_class=HTMLResponse)
+async def gmail_connection_guide_ui(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Show Gmail connection guide page UI.
+    
+    Displays a page to connect Gmail or shows connected status.
+    Requires authentication.
+    """
+    user = await get_current_user(request, db)
+    is_connected = bool(user.encrypted_access_token)
+    
+    html_content = get_connect_gmail_page(
+        oauth_start_url="/api/v1/oauth/google",
+        is_test=False,
+        is_connected=is_connected
+    )
+    return HTMLResponse(content=html_content)
 
 
 @router.get("", response_model=EmailListResponse)
@@ -390,3 +418,142 @@ async def get_email(
         attachment_count=email.attachment_count or 0,
         labels=email.labels
     )
+
+
+# ============== HTML UI Endpoints ==============
+
+@router.get("/ui/connect", response_class=HTMLResponse)
+async def email_connect_gmail_ui(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Show Gmail connection page UI.
+    
+    Displays a page to connect Gmail or shows connected status.
+    Requires authentication.
+    """
+    user = await get_current_user(request, db)
+    is_connected = bool(user.encrypted_access_token)
+    
+    html_content = get_connect_gmail_page(
+        oauth_start_url="/api/v1/oauth/google",
+        is_test=False,
+        is_connected=is_connected
+    )
+    return HTMLResponse(content=html_content)
+
+
+@router.get("/ui/list", response_class=HTMLResponse)
+async def email_list_ui(
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Show email list page UI.
+    
+    Displays paginated list of emails in a user-friendly HTML page.
+    Requires authentication.
+    """
+    user = await get_current_user(request, db)
+    
+    # Get total count
+    count_query = select(func.count(Email.id)).where(
+        Email.user_id == str(user.id),
+        Email.org_id == user.org_id
+    )
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+    
+    # Get emails
+    query = (
+        select(Email)
+        .where(Email.user_id == str(user.id), Email.org_id == user.org_id)
+        .order_by(Email.sent_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    
+    result = await db.execute(query)
+    emails = result.scalars().all()
+    
+    email_list = [
+        {
+            "id": str(email.id),
+            "message_id": email.message_id,
+            "subject": email.subject,
+            "sender": email.sender,
+            "sender_name": email.sender_name,
+            "sent_at": email.sent_at.isoformat() if email.sent_at else "",
+            "has_attachments": email.has_attachments or False,
+            "labels": email.labels
+        }
+        for email in emails
+    ]
+    
+    html_content = get_email_list_page(
+        emails=email_list,
+        total=total,
+        offset=offset,
+        limit=limit,
+        base_url="/api/v1/emails/ui/list",
+        is_test=False
+    )
+    return HTMLResponse(content=html_content)
+
+
+@router.get("/ui/view/{email_id}", response_class=HTMLResponse)
+async def email_detail_ui(
+    email_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Show email detail page UI.
+    
+    Displays full email content in a user-friendly HTML page.
+    Requires authentication.
+    """
+    user = await get_current_user(request, db)
+    
+    # Get email (with tenant isolation)
+    query = select(Email).where(
+        Email.id == email_id,
+        Email.user_id == str(user.id),
+        Email.org_id == user.org_id
+    )
+    
+    result = await db.execute(query)
+    email = result.scalar_one_or_none()
+    
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Email not found"
+        )
+    
+    email_data = {
+        "id": str(email.id),
+        "message_id": email.message_id,
+        "thread_id": email.thread_id,
+        "subject": email.subject,
+        "sender": email.sender,
+        "sender_name": email.sender_name,
+        "recipients_to": email.recipients_to,
+        "recipients_cc": email.recipients_cc,
+        "sent_at": email.sent_at.isoformat() if email.sent_at else "",
+        "body_text": email.body_text,
+        "body_html": email.body_html,
+        "has_attachments": email.has_attachments or False,
+        "attachment_count": email.attachment_count or 0,
+        "labels": email.labels
+    }
+    
+    html_content = get_email_detail_page(
+        email=email_data,
+        back_url="/api/v1/emails/ui/list",
+        is_test=False
+    )
+    return HTMLResponse(content=html_content)

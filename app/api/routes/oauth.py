@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -18,6 +18,7 @@ from app.core.config import get_settings
 from app.db.session import get_async_db
 from app.models.user import User
 from app.services.token_service import get_token_service
+from app.ui import get_connect_gmail_page, get_oauth_success_page
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -49,8 +50,23 @@ class UserInfoResponse(BaseModel):
     last_email_sync: Optional[datetime] = None
 
 
-@router.get("/google")
+@router.get("/google", response_class=HTMLResponse)
 async def google_oauth_init(request: Request):
+    """
+    Show Gmail connection UI page.
+    
+    Displays a page explaining the OAuth flow and a button to start it.
+    """
+    html_content = get_connect_gmail_page(
+        oauth_start_url="/api/v1/oauth/google/start",
+        is_test=False,
+        is_connected=False
+    )
+    return HTMLResponse(content=html_content)
+
+
+@router.get("/google/start")
+async def google_oauth_start(request: Request):
     """
     Initiate Google OAuth flow.
     
@@ -246,14 +262,16 @@ async def google_oauth_callback(
     
     logger.info(f"OAuth flow completed for user {user.id}")
     
-    # Return token response (in production, might redirect to frontend with token)
-    return TokenResponse(
-        access_token=app_token,
-        token_type="bearer",
-        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    # Return success UI page with link to email list
+    html_content = get_oauth_success_page(
+        user_email=user.email,
         user_id=str(user.id),
-        email=user.email
+        org_id=user.org_id,
+        synced_count=0,
+        emails_url="/api/v1/emails/ui/list",
+        is_test=False
     )
+    return HTMLResponse(content=html_content)
 
 
 @router.get("/me", response_model=UserInfoResponse)
