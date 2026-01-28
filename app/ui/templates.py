@@ -485,11 +485,32 @@ def get_oauth_success_page(
     user_email: str,
     user_id: str,
     org_id: str,
+    access_token: str = "",
     synced_count: int = 0,
     emails_url: str = "/api/v1/emails",
     is_test: bool = False
 ) -> str:
-    """Generate OAuth success page."""
+    """Generate OAuth success page with Bearer token."""
+    token_section = ""
+    if access_token:
+        token_section = f"""
+        <div class="card" style="background: #1a1a2e; color: #fff; margin-top: 20px;">
+            <h3 style="color: #4ade80; margin-bottom: 15px;">🔑 Your Access Token</h3>
+            <p style="color: #9ca3af; margin-bottom: 10px;">Use this Bearer token for API requests:</p>
+            <div style="background: #0f0f1a; padding: 15px; border-radius: 8px; word-break: break-all; font-family: monospace; font-size: 12px; border: 1px solid #333;">
+                <code id="token-code" style="color: #60a5fa;">{access_token}</code>
+            </div>
+            <button onclick="navigator.clipboard.writeText(document.getElementById('token-code').textContent).then(() => {{ this.textContent = '✓ Copied!'; setTimeout(() => this.textContent = '📋 Copy Token', 2000); }})" 
+                    style="margin-top: 15px; background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                📋 Copy Token
+            </button>
+            <div style="margin-top: 15px; padding: 12px; background: #1e293b; border-radius: 6px;">
+                <p style="color: #9ca3af; margin-bottom: 8px; font-size: 13px;"><strong>Usage Example:</strong></p>
+                <code style="color: #fbbf24; font-size: 11px;">curl -H "Authorization: Bearer {access_token[:50]}..." http://localhost:8000/api/v1/emails</code>
+            </div>
+        </div>
+        """
+    
     content = f"""
     <div class="card">
         <div class="header">
@@ -507,12 +528,8 @@ def get_oauth_success_page(
         
         <div class="stats-grid">
             <div class="stat-card">
-                <div class="stat-value">{synced_count}</div>
-                <div class="stat-label">Emails Synced</div>
-            </div>
-            <div class="stat-card">
                 <div class="stat-value">✓</div>
-                <div class="stat-label">Gmail Connected</div>
+                <div class="stat-label">Authenticated</div>
             </div>
         </div>
         
@@ -522,16 +539,18 @@ def get_oauth_success_page(
             <p><strong>Org ID:</strong> <code>{org_id}</code></p>
         </div>
         
-        <h3>What's Next?</h3>
+        {token_section}
+        
+        <h3 style="margin-top: 25px;">What's Next?</h3>
         <ul>
-            <li>Browse your synced emails</li>
-            <li>Use AI to search through your inbox</li>
-            <li>Ask questions about your email content</li>
+            <li>Copy the Bearer token above for API requests</li>
+            <li>Use the Swagger UI at <a href="/docs" style="color: #3b82f6;">/docs</a> to test endpoints</li>
+            <li>Sync emails: <code>POST /api/v1/emails/sync</code></li>
+            <li>Query with AI: <code>POST /api/v1/rag/query</code></li>
         </ul>
         
         <div style="margin-top: 25px; display: flex; gap: 15px; flex-wrap: wrap;">
-            <a href="{emails_url}" class="btn">📬 View Emails</a>
-            <a href="{emails_url.replace('/emails', '/rag/query')}" class="btn btn-secondary">🔍 Search with AI</a>
+            <a href="/docs" class="btn">📚 API Docs (Swagger)</a>
         </div>
     </div>
     """

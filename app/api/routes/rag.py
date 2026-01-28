@@ -28,7 +28,7 @@ from app.db.session import get_async_db
 from app.models.email import Email
 from app.models.user import User
 from app.services.rag_service import get_rag_service
-from app.core.security import get_current_user
+from app.api.routes.dependencies import get_current_user_from_request, get_db_from_request
 from app.core.logging import audit_logger
 import logging
 
@@ -110,16 +110,14 @@ class RAGStatusResponse(BaseModel):
 
 
 @router.get("/status", response_model=RAGStatusResponse)
-async def rag_status(
-    request: Request,
-    db: AsyncSession = Depends(get_async_db)
-):
+async def rag_status(request: Request):
     """
     Check if RAG service is ready for queries.
     
     Returns status of Gmail connection and synced emails.
     """
-    user = await get_current_user(request, db)
+    user = get_current_user_from_request(request)
+    db = get_db_from_request(request)
     
     # Check email count
     count_query = select(func.count(Email.id)).where(
@@ -150,11 +148,7 @@ async def rag_status(
 
 
 @router.post("/query", response_model=RAGQueryResponse)
-async def rag_query(
-    request_body: RAGQueryRequest,
-    request: Request,
-    db: AsyncSession = Depends(get_async_db)
-):
+async def rag_query(request_body: RAGQueryRequest, request: Request):
     """
     Execute RAG query on user's emails.
     
@@ -173,8 +167,10 @@ async def rag_query(
     2. Gmail must be connected via /api/v1/oauth/google
     3. Emails must be synced via POST /api/v1/emails/sync
     """
-    # Get authenticated user
-    user = await get_current_user(request, db)
+    user = get_current_user_from_request(request)
+    db = get_db_from_request(request)
+    
+    # Get user info
     user_id = str(user.id)
     org_id = user.org_id
     request_id = getattr(request.state, "request_id", "unknown")

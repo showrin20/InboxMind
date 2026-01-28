@@ -4,13 +4,11 @@ Google OAuth authentication flow
 """
 import logging
 import secrets
-from typing import Optional
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import RedirectResponse, HTMLResponse
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -18,66 +16,28 @@ from app.core.config import get_settings
 from app.db.session import get_async_db
 from app.models.user import User
 from app.services.token_service import get_token_service
-from app.ui import get_connect_gmail_page, get_oauth_success_page
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-
 # In-memory state storage (use Redis in production)
 _oauth_states: dict = {}
 
 
-class TokenResponse(BaseModel):
-    """OAuth token response"""
-    access_token: str
-    token_type: str = "bearer"
-    expires_in: int
-    user_id: str
-    email: str
-
-
-class UserInfoResponse(BaseModel):
-    """User info response"""
-    id: str
-    email: str
-    full_name: Optional[str] = None
-    oauth_provider: str
-    is_active: bool
-    email_sync_enabled: bool
-    last_email_sync: Optional[datetime] = None
-
-
-@router.get("/google", response_class=HTMLResponse)
-async def google_oauth_init(request: Request):
+@router.get("/start")
+async def oauth_start():
     """
-    Show Gmail connection UI page.
+    Get Google OAuth URL.
     
-    Displays a page explaining the OAuth flow and a button to start it.
-    """
-    html_content = get_connect_gmail_page(
-        oauth_start_url="/api/v1/oauth/google/start",
-        is_test=False,
-        is_connected=False
-    )
-    return HTMLResponse(content=html_content)
-
-
-@router.get("/google/start")
-async def google_oauth_start(request: Request):
-    """
-    Initiate Google OAuth flow.
-    
-    Redirects the user to Google's OAuth consent screen.
-    After consent, Google will redirect back to /oauth/google/callback.
+    Returns the OAuth URL - open it in your browser to authenticate with Google.
+    Do NOT use "Try it out" in Swagger - copy the oauth_url and paste in a new browser tab.
     """
     # Generate secure state token to prevent CSRF
     state = secrets.token_urlsafe(32)
     _oauth_states[state] = {
-        "created_at": datetime.now(timezone.utc),
-        "request_id": getattr(request.state, "request_id", None)
+        "created_at": datetime.now(timezone.utc)
     }
     
     # Build OAuth URL
@@ -87,15 +47,19 @@ async def google_oauth_start(request: Request):
         "response_type": "code",
         "scope": " ".join(settings.GOOGLE_SCOPES),
         "state": state,
-        "access_type": "offline",  # Request refresh token
-        "prompt": "consent"  # Force consent to get refresh token
+        "access_type": "offline",
+        "prompt": "consent"
     }
     
     oauth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(oauth_params)}"
     
     logger.info(f"Initiating Google OAuth flow, state={state[:8]}...")
     
-    return RedirectResponse(url=oauth_url)
+    return {
+        "message": "InboxMind OAuth",
+        "oauth_url": oauth_url,
+        "instructions": "Open the oauth_url in your browser (copy and paste into a new tab)"
+    }
 
 
 @router.get("/google/callback")
@@ -109,7 +73,7 @@ async def google_oauth_callback(
     Handle Google OAuth callback.
     
     Exchanges authorization code for tokens, creates/updates user,
-    and stores encrypted tokens.
+    stores encrypted tokens, and redirects to email list.
     """
     import aiohttp
     
@@ -216,7 +180,6 @@ async def google_oauth_callback(
             logger.info(f"Linked Google account to existing user: {email}")
         else:
             # Create new user
-            # Generate org_id for demo (in production, this would come from signup flow)
             org_id = f"org_{secrets.token_hex(8)}"
             
             user = User(
@@ -229,7 +192,7 @@ async def google_oauth_callback(
                 email_sync_enabled=True
             )
             db.add(user)
-            await db.flush()  # Get user.id
+            await db.flush()
             logger.info(f"Created new user: {email}")
     
     # Store encrypted tokens
@@ -255,6 +218,7 @@ async def google_oauth_callback(
     app_token = create_access_token(
         data={
             "sub": str(user.id),
+            "user_id": str(user.id),
             "email": user.email,
             "org_id": user.org_id
         }
@@ -262,143 +226,90 @@ async def google_oauth_callback(
     
     logger.info(f"OAuth flow completed for user {user.id}")
     
-    # Return success UI page with link to email list
-    html_content = get_oauth_success_page(
-        user_email=user.email,
-        user_id=str(user.id),
-        org_id=user.org_id,
-        synced_count=0,
-        emails_url="/api/v1/emails/ui/list",
-        is_test=False
-    )
+    # Return success UI page with Bearer token
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>InboxMind - Authentication Successful</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+                margin: 0;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            }}
+            .container {{
+                background: white;
+                padding: 2.5rem;
+                border-radius: 16px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                max-width: 600px;
+                width: 90%;
+            }}
+            h1 {{ color: #28a745; margin-bottom: 1rem; }}
+            .success {{ background: #d4edda; border-left: 4px solid #28a745; padding: 15px; border-radius: 8px; margin: 20px 0; }}
+            .info {{ background: #e7f3ff; border-left: 4px solid #1a73e8; padding: 15px; border-radius: 8px; margin: 20px 0; }}
+            .token-box {{
+                background: #1a1a2e;
+                color: #60a5fa;
+                padding: 15px;
+                border-radius: 8px;
+                word-break: break-all;
+                font-family: monospace;
+                font-size: 12px;
+                margin: 15px 0;
+            }}
+            .btn {{
+                background: #3b82f6;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-weight: 600;
+                margin: 5px;
+                text-decoration: none;
+                display: inline-block;
+            }}
+            .btn:hover {{ background: #2563eb; }}
+            code {{ background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🎉 Authentication Successful!</h1>
+            
+            <div class="success">
+                <strong>✓ Connected as:</strong> {user.email}
+            </div>
+            
+            <div class="info">
+                <strong>Your Credentials:</strong><br>
+                <strong>User ID:</strong> <code>{user.id}</code><br>
+                <strong>Org ID:</strong> <code>{user.org_id}</code>
+            </div>
+            
+            <h3>🔑 Your Access Token</h3>
+            <p>Use this Bearer token for API requests:</p>
+            <div class="token-box" id="token">{app_token}</div>
+            
+            <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('token').textContent).then(() => {{ this.textContent = '✓ Copied!'; setTimeout(() => this.textContent = '📋 Copy Token', 2000); }})">
+                📋 Copy Token
+            </button>
+            <a href="/docs" class="btn">📚 API Docs</a>
+            
+            <h3 style="margin-top: 25px;">Next Steps</h3>
+            <ul>
+                <li>Use the token in header: <code>Authorization: Bearer &lt;token&gt;</code></li>
+                <li>Get emails: <code>GET /api/v1/emails</code></li>
+                <li>Query with AI: <code>POST /api/v1/rag/query</code></li>
+            </ul>
+        </div>
+    </body>
+    </html>
+    """
     return HTMLResponse(content=html_content)
-
-
-@router.get("/me", response_model=UserInfoResponse)
-async def get_current_user(
-    request: Request,
-    db: AsyncSession = Depends(get_async_db)
-):
-    """
-    Get current authenticated user info.
-    
-    Requires valid JWT token in Authorization header.
-    """
-    from app.core.security import get_current_user_id
-    
-    # Get user ID from JWT
-    try:
-        user_id = await get_current_user_id(request)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing authentication"
-        )
-    
-    # Get user from database
-    result = await db.execute(
-        select(User).where(User.id == user_id)
-    )
-    user = result.scalar_one_or_none()
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    return UserInfoResponse(
-        id=str(user.id),
-        email=user.email,
-        full_name=user.full_name,
-        oauth_provider=user.oauth_provider or "",
-        is_active=user.is_active,
-        email_sync_enabled=user.email_sync_enabled,
-        last_email_sync=user.last_email_sync
-    )
-
-
-@router.post("/logout")
-async def logout(
-    request: Request,
-    db: AsyncSession = Depends(get_async_db)
-):
-    """
-    Logout user and revoke OAuth tokens.
-    """
-    from app.core.security import get_current_user_id
-    
-    try:
-        user_id = await get_current_user_id(request)
-    except Exception:
-        # Already logged out or invalid token
-        return {"message": "Logged out"}
-    
-    # Get user
-    result = await db.execute(
-        select(User).where(User.id == user_id)
-    )
-    user = result.scalar_one_or_none()
-    
-    if user:
-        # Revoke OAuth tokens
-        token_service = get_token_service()
-        await token_service.revoke_tokens(db, user)
-    
-    logger.info(f"User logged out: {user_id}")
-    
-    return {"message": "Logged out successfully"}
-
-
-@router.post("/refresh")
-async def refresh_token(
-    request: Request,
-    db: AsyncSession = Depends(get_async_db)
-):
-    """
-    Refresh the application JWT token.
-    
-    Also refreshes the OAuth token if needed.
-    """
-    from app.core.security import get_current_user_id, create_access_token
-    
-    try:
-        user_id = await get_current_user_id(request)
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token"
-        )
-    
-    # Get user
-    result = await db.execute(
-        select(User).where(User.id == user_id)
-    )
-    user = result.scalar_one_or_none()
-    
-    if not user or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found or inactive"
-        )
-    
-    # Ensure OAuth token is valid (refreshes if needed)
-    token_service = get_token_service()
-    await token_service.get_valid_access_token(db, user)
-    
-    # Create new app token
-    app_token = create_access_token(
-        data={
-            "sub": str(user.id),
-            "email": user.email,
-            "org_id": user.org_id
-        }
-    )
-    
-    return TokenResponse(
-        access_token=app_token,
-        token_type="bearer",
-        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        user_id=str(user.id),
-        email=user.email
-    )

@@ -8,7 +8,6 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
-from fastapi.openapi.utils import get_openapi
 import time
 import uuid
 
@@ -17,12 +16,8 @@ from app.core.logging import setup_logging, audit_logger
 from app.db.session import init_db, close_db
 from app.vectorstore.pinecone_client import get_pinecone_client
 
-# Import routers
-from app.api.routes import rag
-from app.api.routes import emails
-from app.api.routes import auth
-from app.api.routes import oauth
-from app.api.routes import test as test_routes
+# Import centralized routes
+from app.api.routes import api_router, register_all_routes
 
 settings = get_settings()
 
@@ -84,42 +79,6 @@ app = FastAPI(
     redoc_url="/redoc" if settings.DEBUG else None,
     lifespan=lifespan
 )
-
-
-def custom_openapi():
-    """Custom OpenAPI schema with security"""
-    if app.openapi_schema:
-        return app.openapi_schema
-    
-    openapi_schema = get_openapi(
-        title=app.title,
-        version=app.version,
-        description=app.description,
-        routes=app.routes,
-    )
-    
-    # Add security scheme
-    openapi_schema["components"]["securitySchemes"] = {
-        "BearerAuth": {
-            "type": "http",
-            "scheme": "bearer",
-            "bearerFormat": "JWT",
-            "description": "Enter your JWT token from /auth/register or /auth/login"
-        }
-    }
-    
-    # Apply security to all endpoints except auth
-    for path in openapi_schema["paths"]:
-        if "/auth/register" not in path and "/auth/login" not in path and "/auth/help" not in path and "/health" not in path:
-            for method in openapi_schema["paths"][path]:
-                if method != "parameters":
-                    openapi_schema["paths"][path][method]["security"] = [{"BearerAuth": []}]
-    
-    app.openapi_schema = openapi_schema
-    return app.openapi_schema
-
-
-app.openapi = custom_openapi
 
 
 # CORS middleware
@@ -259,20 +218,8 @@ async def root():
     }
 
 
-# Register routers
-app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["Auth"])
-app.include_router(oauth.router, prefix=f"{settings.API_V1_PREFIX}/oauth", tags=["OAuth"])
-app.include_router(rag.router, prefix=f"{settings.API_V1_PREFIX}/rag", tags=["RAG"])
-app.include_router(emails.router, prefix=f"{settings.API_V1_PREFIX}/emails", tags=["Emails"])
-
-# Register test routes only in development mode
-if settings.DEBUG or settings.APP_ENV == "development":
-    app.include_router(
-        test_routes.router, 
-        prefix=f"{settings.API_V1_PREFIX}/test", 
-        tags=["Test (No Auth)"]
-    )
-    logger.warning("Test routes enabled - these bypass authentication!")
+# Register all routes from centralized routes module
+register_all_routes(app)
 
 
 if __name__ == "__main__":
