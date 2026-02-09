@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker
 )
 from sqlalchemy.orm import Session
-from sqlalchemy.pool import NullPool, QueuePool
+from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
 import logging
 
 from app.core.config import get_settings
@@ -34,7 +34,7 @@ else:
         echo=settings.DB_ECHO,
         pool_size=settings.DB_POOL_SIZE,
         max_overflow=settings.DB_MAX_OVERFLOW,
-        poolclass=QueuePool,
+        poolclass=AsyncAdaptedQueuePool,
         future=True,
     )
 

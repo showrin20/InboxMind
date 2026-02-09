@@ -17,6 +17,7 @@ from app.core.config import get_settings
 from app.api.routes.oauth import router as oauth_router
 from app.api.routes.rag import router as rag_router
 from app.api.routes.emails import router as emails_router
+from app.api.routes.chat import router as chat_router
 
 # Import authentication dependency
 from app.api.routes.dependencies import require_auth, AuthenticatedUser
@@ -54,6 +55,12 @@ def register_all_routes(app) -> None:
         tags=["Emails"],
         dependencies=[Depends(require_auth)]
     )
+    app.include_router(
+        chat_router, 
+        prefix=f"{settings.API_V1_PREFIX}/chat", 
+        tags=["Chat"],
+        dependencies=[Depends(require_auth)]
+    )
 
 
 # =============================================================================
@@ -79,5 +86,11 @@ api_router.include_router(
     emails_router, 
     prefix="/emails", 
     tags=["Emails"],
+    dependencies=[Depends(require_auth)]
+)
+api_router.include_router(
+    chat_router, 
+    prefix="/chat", 
+    tags=["Chat"],
     dependencies=[Depends(require_auth)]
 )
